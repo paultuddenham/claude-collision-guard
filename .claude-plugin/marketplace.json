@@ -1,0 +1,12 @@
+{
+  "name": "tudlab",
+  "description": "Free Claude Code plugins from Tudlab Code.",
+  "owner": { "name": "Tudlab Code" },
+  "plugins": [
+    {
+      "name": "collision-guard",
+      "source": "./",
+      "description": "Stops two Claude Code sessions writing over each other. One Python file, standard library only, MIT."
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+#!/bin/sh
+# Runs one plugin script with a working Python 3 (3.8 or later).
+#   run-hook <script.py> [mode ...]      hook payload arrives on stdin
+#
+# Finds the interpreter once and remembers it. On Windows it prefers "python"
+# and "py -3". A Microsoft Store Python is accepted after the same version
+# check as any other; the Store placeholder (an alias that opens the Store, not
+# a Python) is recognised and never run. If no Python is found it exits 0:
+# hooks fail open and never block.
+
+here=$(cd "$(dirname "$0")" && pwd)
+script="$here/$1"
+[ $# -gt 0 ] && shift
+[ -f "$script" ] || exit 0
+
+home_dir="${ORCH_HOME:-$HOME/.claude/orchestration}"
+cache="$home_dir/python.txt"
+PY=""
+PYARG=""
+
+if [ -f "$cache" ]; then
+  PY=$(sed -n 1p "$cache" 2>/dev/null)
+  PYARG=$(sed -n 2p "$cache" 2>/dev/null)
+  [ -n "$PY" ] && [ -x "$PY" ] || PY=""
+fi
+
+if [ -z "$PY" ]; then
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) order="python py python3" ;;
+    *) order="python3 python" ;;
+  esac
+  for c in $order; do
+    p=$(command -v "$c" 2>/dev/null) || continue
+    case "$p" in
+      *WindowsApps*)
+        # Two different things live here. A real Microsoft Store Python is an
+        # alias into its PythonSoftwareFoundation.Python.3.x package, which sits
+        # next to it. The placeholder is a 0-byte alias to the App Installer
+        # redirector: running it opens the Store instead of Python, so it is
+        # never run. Anything that is not clearly the real one is skipped.
+        t=$(readlink "$p" 2>/dev/null)
+        case "$t" in *AppInstaller*|*DesktopAppInstaller*) continue ;; esac
+        case "$t" in
+          *PythonSoftwareFoundation.Python.3*) ;;
+          *)
+            found=""
+            for pkg in "$(dirname "$p")"/PythonSoftwareFoundation.Python.3*; do
+              [ -e "$pkg" ] && found=1 && break
+            done
+            [ -n "$found" ] || continue
+            ;;
+        esac
+        ;;
+    esac
+    a=""
+    [ "$c" = "py" ] && a="-3"
+    if "$p" $a -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' </dev/null >/dev/null 2>&1; then
+      PY="$p"
+      PYARG="$a"
+      break
+    fi
+  done
+  [ -n "$PY" ] || exit 0
+  mkdir -p "$home_dir" 2>/dev/null && printf '%s\n%s\n' "$PY" "$PYARG" > "$cache" 2>/dev/null
+fi
+
+"$PY" $PYARG "$script" "$@"
+rc=$?
+# Exit code 2 means "block" to Claude Code. Python uses 2 for its own startup
+# errors, so never pass it through: a broken install must not block work.
+[ "$rc" -eq 2 ] && rc=1
+exit $rc

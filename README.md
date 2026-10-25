@@ -1,6 +1,6 @@
 # Collision Guard for Claude Code (free)
 
-Stops two Claude Code sessions from writing over each other.
+Warns a Claude Code session before it writes over another session's work.
 
 Part of a larger setup: [How the whole memory setup fits together](https://tudlab.com/memory).
 
@@ -58,10 +58,10 @@ command with `python3 ~/.claude/orchestration/claims.py` (keep the last word:
 ## Check it is alive
 
 ```
-python3 <path-to>/claims.py health
+python3 ~/.claude/plugins/cache/tudlab/collision-guard/1.0.0/scripts/claims.py health
 ```
 
-prints the last guard decisions. "The guard has never run" means the hooks
+prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
 are not wired. A guard that fails silently looks exactly like a quiet one, so
 run this now and then.
 
@@ -87,7 +87,7 @@ a broad label on every file that matches, so two sessions in the same area see
 each other even when they touch different files.
 
 To drop this session's claims early:
-`echo '{"session_id": "<id>"}' | python3 <path-to>/claims.py release`
+`echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/1.0.0/scripts/claims.py release`
 
 ## Turn it off
 

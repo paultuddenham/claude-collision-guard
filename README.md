@@ -36,10 +36,10 @@ claude plugin marketplace add paultuddenham/claude-collision-guard
 claude plugin install collision-guard@tudlab
 ```
 
-Start a new session. Then check the guard actually fires:
+Start a new session. Then check the guard actually fires (replace `<version>` with the folder name under `~/.claude/plugins/cache/tudlab/collision-guard/`):
 
 ```
-python3 ~/.claude/plugins/cache/tudlab/collision-guard/1.0.0/scripts/claims.py selftest
+python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py selftest
 ```
 
 (On Windows use `python`.) You should see three PASS lines. Or try it for
@@ -58,7 +58,7 @@ command with `python3 ~/.claude/orchestration/claims.py` (keep the last word:
 ## Check it is alive
 
 ```
-python3 ~/.claude/plugins/cache/tudlab/collision-guard/1.0.0/scripts/claims.py health
+python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py health
 ```
 
 prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
@@ -87,7 +87,7 @@ a broad label on every file that matches, so two sessions in the same area see
 each other even when they touch different files.
 
 To drop this session's claims early:
-`echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/1.0.0/scripts/claims.py release`
+`echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py release`
 
 ## Turn it off
 

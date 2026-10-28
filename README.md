@@ -4,7 +4,7 @@ Warns a Claude Code session before it writes over another session's work.
 
 Part of a larger setup: [How the whole memory setup fits together](https://tudlab.com/memory).
 
-If you run several sessions at once, each one starts blind. One edits a
+If you run several sessions at once in the same project, each one starts blind. One edits a
 config file; another, on a different task, saves its own copy of the same
 file a few minutes later, and the first change is gone. Nobody notices until
 something breaks.
@@ -62,8 +62,8 @@ python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.
 ```
 
 prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
-are not wired. A guard that fails silently looks exactly like a quiet one, so
-run this now and then.
+are not wired. A guard whose hooks are not wired prints nothing, which looks
+the same as a quiet one, so run this now and then.
 
 ## Why "block once" and not "ask"
 

@@ -2,7 +2,7 @@
 
 Warns a Claude Code session before it writes over another session's work.
 
-Part of a larger setup: [How the whole memory setup fits together](https://tudlab.com/memory).
+Part of a larger setup for running many sessions at once, where shared memory and collision protection work together: [How the whole memory setup fits together](https://tudlab.com/memory).
 
 If you run several sessions at once in the same project, each one starts blind. One edits a
 config file; another, on a different task, saves its own copy of the same
@@ -52,7 +52,7 @@ Copy `scripts/claims.py` to `~/.claude/orchestration/claims.py` and add the
 hooks to `~/.claude/settings.json` yourself. The five hook entries (the digest
 command runs twice, at session start and on each prompt) are in
 `hooks/hooks.json`; replace the `sh ... run-hook claims.py` part of each
-command with `python3 ~/.claude/orchestration/claims.py` (keep the last word:
+command with `python3 ~/.claude/orchestration/claims.py` (on Windows use `python`; keep the last word:
 `digest`, `check`, `touch` or `end`).
 
 ## Check it is alive

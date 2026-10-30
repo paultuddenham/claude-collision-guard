@@ -61,7 +61,7 @@ command with `python3 ~/.claude/orchestration/claims.py` (on Windows use `python
 python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py health
 ```
 
-prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
+This prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
 are not wired. A guard whose hooks are not wired prints nothing, which looks
 the same as a quiet one, so run this now and then.
 
@@ -88,6 +88,8 @@ each other even when they touch different files.
 
 To drop this session's claims early:
 `echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py release`
+
+Replace `<id>` with the id of the session you want to release. It is the file name (without `.jsonl`) of that session's transcript under `~/.claude/projects/`. If you run the command inside that session, send `{}` instead of the id part (`echo '{}' | ...`): the guard falls back to the `CLAUDE_CODE_SESSION_ID` environment variable.
 
 ## Turn it off
 

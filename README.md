@@ -17,7 +17,8 @@ This plugin is one Python file and a few hooks:
 - Before a write, a **guard** checks the claims. If another live session holds
   the same thing, or changed the file since this session last read it, the
   write is **blocked once** with a plain reason. The agent coordinates, then
-  its retry goes through. A block happens once per conflict, so a session is never stuck waiting.
+  its retry goes through. The block does not stay: it fires once per conflict,
+  so a session is never stuck waiting. It is a prompt to coordinate, not a lock.
 - Every session sees a short table of what the other live sessions are
   changing right now.
 - A claim lasts until its session closes, or until it sits unused for 45
@@ -53,7 +54,15 @@ hooks to `~/.claude/settings.json` yourself. The five hook entries (the digest
 command runs twice, at session start and on each prompt) are in
 `hooks/hooks.json`; replace the `sh ... run-hook claims.py` part of each
 command with `python3 ~/.claude/orchestration/claims.py` (on Windows use `python`; keep the last word:
-`digest`, `check`, `touch` or `end`).
+`digest`, `check`, `touch` or `end`). For example, the guard entry under `PreToolUse` in `settings.json` looks like this:
+
+```json
+{ "type": "command",
+  "command": "python3 ~/.claude/orchestration/claims.py check",
+  "timeout": 10 }
+```
+
+Keep the `matcher` and `timeout` values from `hooks/hooks.json` for each event.
 
 ## Check it is alive
 

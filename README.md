@@ -98,7 +98,7 @@ each other even when they touch different files.
 To drop this session's claims early:
 `echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py release`
 
-Replace `<id>` with the id of the session you want to release. It is the file name (without `.jsonl`) of that session's transcript under `~/.claude/projects/`. If you run the command inside that session, send `{}` instead of the id part (`echo '{}' | ...`): the guard falls back to the `CLAUDE_CODE_SESSION_ID` environment variable.
+Replace `<id>` with the id of the session you want to release. It is the file name (without `.jsonl`) of that session's transcript under `~/.claude/projects/<project>/`. If you run the command inside that session, send `{}` instead of the id part (`echo '{}' | ...`): the guard falls back to the `CLAUDE_CODE_SESSION_ID` environment variable.
 
 ## Turn it off
 

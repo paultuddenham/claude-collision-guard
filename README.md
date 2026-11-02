@@ -16,8 +16,8 @@ This plugin is one Python file and a few hooks:
   quoted text in a command (a commit message, say) is ignored.
 - Before a write, a **guard** checks the claims. If another live session holds
   the same thing, or changed the file since this session last read it, the
-  write is **blocked once** with a plain reason. The agent coordinates, then
-  its retry goes through. The block does not stay: it fires once per conflict,
+  write is **blocked once** with a plain reason. The agent reads the reason,
+  adjusts or checks with the other session, then its retry goes through. The block does not stay: it fires once per conflict,
   so a session is never stuck waiting. It is a prompt to coordinate, not a lock.
 - Every session sees a short table of what the other live sessions are
   changing right now.

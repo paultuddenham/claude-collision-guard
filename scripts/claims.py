@@ -1156,7 +1156,11 @@ def cmd_health(cfg):
         print("Guard log     none yet: the guard has never run. Check the hook wiring.")
     d = load_state()
     print("Live claims   %d" % sum(1 for c in d["claims"].values() if live(c, cfg)))
-    print("Last inject   %s" % inject_age())
+    # The blackboard inject belongs to the full plugin. Only report it when a
+    # blackboard is in use, so the free guard does not print a confusing "never".
+    bb = os.path.expanduser(cfg.get("blackboard_path") or "~/.claude/blackboard.md")
+    if os.path.exists(bb) or os.path.exists(os.path.join(state_dir(), "inject.ok")):
+        print("Last inject   %s" % inject_age())
 
 
 def inject_age(t=None):

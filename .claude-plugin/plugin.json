@@ -1,7 +1,7 @@
 {
   "name": "collision-guard",
   "displayName": "Tudlab Code: Collision Guard (free)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Stops two Claude Code sessions writing over each other: every write claims what it touches, and a pre-write guard blocks once when another live session holds it or changed the file since you read it.",
   "author": {
     "name": "Tudlab Code"

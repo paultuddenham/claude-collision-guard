@@ -1,5 +1,7 @@
 # Collision Guard for Claude Code (free)
 
+[![tests](https://github.com/paultuddenham/claude-collision-guard/actions/workflows/test.yml/badge.svg)](https://github.com/paultuddenham/claude-collision-guard/actions/workflows/test.yml)
+
 Warns a Claude Code session before it writes over another session's work.
 
 Part of a larger setup for running many sessions at once, where shared memory and collision protection work together: [How the whole memory setup fits together](https://tudlab.com/memory).
@@ -100,14 +102,27 @@ To drop this session's claims early:
 
 Replace `<id>` with the id of the session you want to release. It is the file name (without `.jsonl`) of that session's transcript under `~/.claude/projects/<project>/`. If you run the command inside that session, send `{}` instead of the id part (`echo '{}' | ...`): the guard falls back to the `CLAUDE_CODE_SESSION_ID` environment variable.
 
+## Run the tests
+
+From a clone of this repo, with Python 3.8 or later and nothing to install:
+
+```
+python -m unittest discover -s tests -v
+```
+
+Each test uses its own temporary state folder, so it never touches your real
+claims. The last test drives the hook launcher with `sh`, the way Claude Code
+does, and is skipped if `sh` is not on your PATH.
+
 ## Turn it off
 
 `claude plugin disable collision-guard@tudlab`, or set `"guard_mode": "off"`.
 
 ## Limits
 
-- Tested on Windows 11 and Debian Linux. macOS uses the same launcher as
-  Linux but has not been tested on a Mac.
+- Used daily on Windows 11 and Debian Linux. The test suite runs on Linux,
+  Windows and macOS for every push (GitHub Actions), but no one has run it
+  day to day on a Mac yet.
 - It only sees sessions on the same machine (state is local files).
 - Hooks fail open: if Python is missing or anything errors, the call goes
   through. That is deliberate. Use `health` to confirm it is running.

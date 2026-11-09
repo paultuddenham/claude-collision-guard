@@ -75,7 +75,7 @@ python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.
 ```
 
 This prints the last guard decisions (if you copied the file by hand, use `~/.claude/orchestration/claims.py` instead). "The guard has never run" means the hooks
-are not wired. A guard whose hooks are not wired prints nothing, which looks
+are not wired. A guard whose hooks are not wired stays silent while you work, which looks
 the same as a quiet one, so run this now and then.
 
 ## Why "block once" and not "ask"

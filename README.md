@@ -6,6 +6,8 @@ Warns a Claude Code session before it writes over another session's work.
 
 Part of a larger setup for running many sessions at once, where shared memory and collision protection work together: [How the whole memory setup fits together](https://tudlab.com/memory).
 
+The real setup it runs in, drawn as one map with real counts: [a home run by AI agents](https://tudlab.com/answers/home-run-by-ai-agents-map).
+
 If you run several sessions at once in the same project, each one starts blind. One edits a
 config file; another, on a different task, saves its own copy of the same
 file a few minutes later, and the first change is gone. Nobody notices until

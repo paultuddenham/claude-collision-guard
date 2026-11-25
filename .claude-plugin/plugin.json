@@ -1,8 +1,8 @@
 {
   "name": "collision-guard",
   "displayName": "Tudlab Code: Collision Guard (free)",
-  "version": "1.1.0",
-  "description": "Stops two Claude Code sessions writing over each other: every write claims what it touches, and a pre-write guard blocks once when another live session holds it or changed the file since you read it.",
+  "version": "1.2.0",
+  "description": "Stops parallel AI coding agents (Claude Code, Codex, Cursor) writing over each other: file claims and enforced locks, plus guardrails that block reading secrets and destructive git/shell commands.",
   "author": {
     "name": "Tudlab Code"
   },

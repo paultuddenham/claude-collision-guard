@@ -31,6 +31,55 @@ This plugin is one Python file and a few hooks:
 Standard library only. All state is plain JSON in `~/.claude/orchestration/`.
 Nothing is sent anywhere.
 
+## New in 1.2: guardrails that work across agents
+
+Collision Guard only sees Claude Code sessions. If you run Claude Code next to
+Codex CLI or Cursor in the same repo, they cannot see each other's work.
+`scripts/guardrails.py` adds three things, shared by every agent on the machine:
+
+- **File locks that are enforced.** An edit takes a short lock on the file
+  (10 minutes, renewed on each edit, released when the session ends). A second
+  agent that tries to edit the same file is blocked, and told who holds it and
+  until when. Agents without hooks can take and release locks through an MCP
+  server (`acquire_lock`, `release_lock`, `list_locks`).
+- **No reading secrets.** `.env`, `*.pem`, `*.key`, `~/.ssh/*`, `~/.aws/credentials`
+  and a few more are blocked, from the file tools and from shell commands
+  (`cat .env`). `.env.example` and `*.pub` are allowed.
+- **No destructive commands.** `git push --force`, `git reset --hard`,
+  `git clean -f`, `git checkout .`, `rm -rf` on absolute, home, parent or
+  wildcard paths, and `curl ... | sh`. Commands are split into words first,
+  so a commit message that mentions `git push --force` is not blocked, and
+  `sudo`, `env`, `bash -c "..."` wrappers do not hide a command.
+
+The rules are in `guardrails.yaml` (plain text, every rule has a reason the
+agent reads). Put a `.guardrails.yaml` in a project to change them there;
+agents may not edit that file.
+
+| Agent | How it is wired | Locks | Secrets | Commands |
+|---|---|---|---|---|
+| Claude Code | PreToolUse hook (this plugin) | enforced | enforced | enforced |
+| Codex CLI | the same hook, in `~/.codex/hooks.json` | enforced (`apply_patch`) | enforced | enforced |
+| Cursor | `beforeShellExecution` / `beforeReadFile` hooks | taken after each edit, not enforced before | enforced | enforced |
+| Any MCP client | `guardrails.py mcp` (stdio) | if the agent calls it | `check_path` | `check_command` |
+
+Setup for Codex, Cursor and MCP: [docs/other-agents.md](docs/other-agents.md).
+
+Check it from a terminal:
+
+```
+python3 scripts/guardrails.py check-command "git push --force"   # BLOCKED: ...
+python3 scripts/guardrails.py check-path .env                    # BLOCKED: ...
+python3 scripts/guardrails.py locks                              # who holds what
+python3 scripts/guardrails.py unlock path/to/file                # free one by hand
+python3 scripts/guardrails.py health                             # last decisions
+```
+
+What it is not: a sandbox. A determined agent can write a script that reads
+`.env`. It catches the common, accidental cases. If you mainly want broad
+command and secret blocking, [CC Safety Net](https://github.com/kenryu42/claude-code-safety-net)
+covers far more commands; it has no file locks, which is the gap this fills.
+They can run side by side.
+
 ## Install
 
 You need Claude Code with plugin support and Python 3.8 or later. On Windows
@@ -119,6 +168,9 @@ does, and is skipped if `sh` is not on your PATH.
 ## Turn it off
 
 `claude plugin disable collision-guard@tudlab`, or set `"guard_mode": "off"`.
+To keep Collision Guard but loosen the guardrails, put a `.guardrails.yaml`
+with only the rules you want in the project (an empty `deny_commands: []`
+turns command rules off there).
 
 ## Limits
 
@@ -126,6 +178,8 @@ does, and is skipped if `sh` is not on your PATH.
   Windows and macOS for every push (GitHub Actions), but no one has run it
   day to day on a Mac yet.
 - It only sees sessions on the same machine (state is local files).
+- Guardrail locks cover file-tool edits (and Codex `apply_patch`), not files
+  changed by a shell command such as `sed -i`.
 - Hooks fail open: if Python is missing or anything errors, the call goes
   through. That is deliberate. Use `health` to confirm it is running.
 

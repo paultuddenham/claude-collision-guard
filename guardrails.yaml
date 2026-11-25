@@ -1,0 +1,92 @@
+# Guardrails for parallel AI coding agents (Claude Code, Codex CLI, Cursor, any MCP client).
+#
+# Copy this file to .guardrails.yaml in a project to change the rules there
+# (a project file replaces this one; it does not add to it), or point
+# GUARDRAILS_CONFIG at your own file.
+#
+# Format: a small YAML subset. Block maps and lists, comments, and flow values
+# written as JSON (double quotes). PyYAML is not needed.
+
+locks:
+  auto_lock_on_edit: true      # an Edit/Write takes a lock on that file for this session
+  auto_ttl_minutes: 10         # renewed on every edit; released when the session ends
+  max_ttl_minutes: 120         # cap for locks taken through the MCP tool
+
+# Files agents may not read (file tools and shell commands both).
+# A pattern without "/" matches the file name; with "/" it matches the full path.
+deny_read:
+  - ".env"
+  - ".env.*"
+  - "*.pem"
+  - "*.key"
+  - "*.p12"
+  - "*.pfx"
+  - "id_rsa*"
+  - "id_ed25519*"
+  - "id_ecdsa*"
+  - "~/.ssh/*"
+  - "~/.aws/credentials"
+  - "~/.netrc"
+
+# Exceptions to deny_read.
+allow_read:
+  - ".env.example"
+  - ".env.sample"
+  - ".env.template"
+  - "*.pub"
+
+# Files agents may not change. Protects the project's own rules from the agent.
+deny_write:
+  - ".guardrails.yaml"
+
+# Commands are parsed into words first, so text inside quotes (a commit
+# message that mentions "git push --force") never triggers a rule.
+#   command: program, then subcommand words. A list in first place = any of these programs.
+#   flags:   every group must be present; a group is a list of alternatives.
+#            "-f" also matches inside a cluster such as "-rf" or "-fu".
+#   args:    at least one non-flag argument must match one of these globs.
+deny_commands:
+  - id: git-push-force
+    command: ["git", "push"]
+    flags: [["--force", "-f"]]
+    reason: "force-push rewrites shared history. Use --force-with-lease after checking with the user."
+
+  - id: git-push-plus-refspec
+    command: ["git", "push"]
+    args: ["+*"]
+    reason: "a +refspec is a force-push. Ask the user first."
+
+  - id: git-reset-hard
+    command: ["git", "reset"]
+    flags: [["--hard"]]
+    reason: "discards uncommitted work, possibly another agent's. Use git stash, or ask the user."
+
+  - id: git-clean-force
+    command: ["git", "clean"]
+    flags: [["-f", "--force"]]
+    reason: "deletes untracked files, possibly another agent's new work. Ask the user."
+
+  - id: git-checkout-discard
+    command: ["git", "checkout"]
+    args: ["."]
+    reason: "throws away every uncommitted change in the tree. Ask the user."
+
+  - id: rm-rf-wide
+    command: ["rm"]
+    flags: [["-r", "-R", "--recursive"], ["-f", "--force"]]
+    args: ["/", "/*", "~", "~/*", "$HOME*", "${HOME}*", ".", "./", "..", "../*", "*[*]*", "[A-Za-z]:/*"]
+    reason: "recursive delete of an absolute, home, parent or wildcard path. Delete named folders inside the project instead (rm -rf build is fine)."
+
+  - id: remove-item-recurse-wide
+    command: [["Remove-Item", "ri", "rm", "del", "rd", "rmdir", "erase"]]
+    flags: [["-Recurse"], ["-Force"]]
+    args: ["/", "/*", "~", "~/*", "$HOME*", "$env:*", ".", "./", "..", "../*", "*[*]*", "[A-Za-z]:/*"]
+    ignore_case: true
+    prefix: true
+    reason: "recursive delete of an absolute, home, parent or wildcard path. Delete named folders inside the project instead."
+
+# Downloading a script and running it in one go.
+pipe_to_shell:
+  from: ["curl", "wget", "iwr", "irm", "Invoke-WebRequest", "Invoke-RestMethod"]
+  to: ["sh", "bash", "zsh", "dash", "ksh", "iex", "Invoke-Expression", "python", "python3", "pwsh", "powershell", "sudo"]
+  reason: "piping a download straight into a shell runs code nobody has read. Download it, read it, then run it."

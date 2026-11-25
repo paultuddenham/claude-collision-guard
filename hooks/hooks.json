@@ -20,6 +20,12 @@
         "hooks": [
           { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" claims.py check", "timeout": 10 }
         ]
+      },
+      {
+        "matcher": "Read|Grep|Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" guardrails.py hook", "timeout": 10 }
+        ]
       }
     ],
     "PostToolUse": [
@@ -33,7 +39,8 @@
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" claims.py end", "timeout": 10 }
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" claims.py end", "timeout": 10 },
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" guardrails.py end", "timeout": 10 }
         ]
       }
     ]

@@ -42,18 +42,26 @@ Codex CLI or Cursor in the same repo, they cannot see each other's work.
   agent that tries to edit the same file is blocked, and told who holds it and
   until when. Agents without hooks can take and release locks through an MCP
   server (`acquire_lock`, `release_lock`, `list_locks`).
-- **No reading secrets.** `.env`, `*.pem`, `*.key`, `~/.ssh/*`, `~/.aws/credentials`
-  and a few more are blocked, from the file tools and from shell commands
-  (`cat .env`). `.env.example` and `*.pub` are allowed.
+- **No reading secrets.** `.env`, `*.pem`, `*.key`, SSH private keys,
+  `~/.aws/credentials` and a few more are blocked, from the file tools and
+  from shell commands that print a file (`cat .env`, `grep KEY .env`).
+  Commands that only name one (`cp .env.example .env`, `echo .env >> .gitignore`)
+  are fine, and so are `.env.example` and `*.pub`.
 - **No destructive commands.** `git push --force`, `git reset --hard`,
-  `git clean -f`, `git checkout .`, `rm -rf` on absolute, home, parent or
-  wildcard paths, and `curl ... | sh`. Commands are split into words first,
-  so a commit message that mentions `git push --force` is not blocked, and
-  `sudo`, `env`, `bash -c "..."` wrappers do not hide a command.
+  `git clean -f`, `git checkout .` / `-f`, `git restore .`, `rm -rf` of the
+  root, a home folder, `.`, `..` or `*` (but `rm -rf build` and
+  `rm -rf /tmp/build-1` are fine), and `curl ... | sh` including
+  `bash -c "$(curl ...)"`. Commands are split into words first, so a commit
+  message that mentions `git push --force` is not blocked, and `sudo -u x`,
+  `env`, `timeout`, `xargs`, `if ... then` and `bash -c "..."` do not hide a command.
 
 The rules are in `guardrails.yaml` (plain text, every rule has a reason the
 agent reads). Put a `.guardrails.yaml` in a project to change them there;
-agents may not edit that file.
+agents may not edit that file, with file tools or the shell. Note that a
+repo you clone can ship its own `.guardrails.yaml`, which then replaces the
+rules for that repo: look at it, as you would at any repo's hooks.
+If the rules file has an error, the guard lets every call through and says
+"Guardrails is OFF" on each call until you fix it.
 
 | Agent | How it is wired | Locks | Secrets | Commands |
 |---|---|---|---|---|

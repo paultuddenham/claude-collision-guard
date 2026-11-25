@@ -12,7 +12,9 @@ locks:
   auto_ttl_minutes: 10         # renewed on every edit; released when the session ends
   max_ttl_minutes: 120         # cap for locks taken through the MCP tool
 
-# Files agents may not read (file tools and shell commands both).
+# Files agents may not read: through the file tools, and through shell
+# commands that print a file (cat, head, grep, Get-Content ...). Commands that
+# only name the file (cp .env.example .env, echo .env >> .gitignore) are fine.
 # A pattern without "/" matches the file name; with "/" it matches the full path.
 deny_read:
   - ".env"
@@ -24,8 +26,9 @@ deny_read:
   - "id_rsa*"
   - "id_ed25519*"
   - "id_ecdsa*"
-  - "~/.ssh/*"
+  - "id_dsa*"
   - "~/.aws/credentials"
+  - "~/.docker/config.json"
   - "~/.netrc"
 
 # Exceptions to deny_read.
@@ -45,6 +48,8 @@ deny_write:
 #   flags:   every group must be present; a group is a list of alternatives.
 #            "-f" also matches inside a cluster such as "-rf" or "-fu".
 #   args:    at least one non-flag argument must match one of these globs.
+#   args_regex: the same with regular expressions (backslashes in paths are
+#            turned into "/" first). Single quotes in YAML keep "\" literal.
 deny_commands:
   - id: git-push-force
     command: ["git", "push"]
@@ -71,19 +76,46 @@ deny_commands:
     args: ["."]
     reason: "throws away every uncommitted change in the tree. Ask the user."
 
+  - id: git-checkout-force
+    command: ["git", "checkout"]
+    flags: [["-f", "--force"]]
+    reason: "throws away uncommitted changes, possibly another agent's. Ask the user."
+
+  - id: git-restore-all
+    command: ["git", "restore"]
+    args_regex: ['^(\.|\*|:/)$']
+    reason: "throws away every uncommitted change in the tree. Ask the user."
+
+  # Wide targets only: the filesystem root or a folder right under it, a home
+  # folder or a folder right in it, the current or parent folder, a sibling
+  # project (../name), or a bare "*". rm -rf build, rm -rf /tmp/build-1,
+  # rm -rf ~/.cache/pip and rm -rf ../other/build are fine.
   - id: rm-rf-wide
     command: ["rm"]
     flags: [["-r", "-R", "--recursive"], ["-f", "--force"]]
-    args: ["/", "/*", "~", "~/*", "$HOME*", "${HOME}*", ".", "./", "..", "../*", "*[*]*", "[A-Za-z]:/*"]
-    reason: "recursive delete of an absolute, home, parent or wildcard path. Delete named folders inside the project instead (rm -rf build is fine)."
+    args_regex:
+      - '^/+[^/]*/?$'
+      - '^/+(home|Users)/+[^/]+/?$'
+      - '^(~|\$HOME|\$\{HOME\})(/+[^/]*)?/?$'
+      - '^\.{1,2}/?(\*)?$'
+      - '^\.\./+[^/]+/?$'
+      - '^\*$'
+      - '^[A-Za-z]:/*[^/]*/?$'
+    reason: "recursive delete of the root, home, current or parent folder, or everything (*). Name the folder inside the project instead (rm -rf build is fine)."
 
   - id: remove-item-recurse-wide
     command: [["Remove-Item", "ri", "rm", "del", "rd", "rmdir", "erase"]]
-    flags: [["-Recurse"], ["-Force"]]
-    args: ["/", "/*", "~", "~/*", "$HOME*", "$env:*", ".", "./", "..", "../*", "*[*]*", "[A-Za-z]:/*"]
+    flags: [["-Recurse"]]
+    args_regex:
+      - '^/+[^/]*/?$'
+      - '^(~|\$HOME|\$env:USERPROFILE|\$env:HOMEDRIVE)(/+[^/]*)?/?$'
+      - '^\.{1,2}/?(\*)?$'
+      - '^\*$'
+      - '^[A-Za-z]:/*[^/]*/?(\*)?$'
+      - '^[A-Za-z]:/+Users/+[^/]+/?(\*)?$'
     ignore_case: true
     prefix: true
-    reason: "recursive delete of an absolute, home, parent or wildcard path. Delete named folders inside the project instead."
+    reason: "recursive delete of a drive, the home folder, the current or parent folder, or everything (*). Name the folder inside the project instead."
 
 # Downloading a script and running it in one go.
 pipe_to_shell:

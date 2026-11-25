@@ -67,7 +67,12 @@ def _scalar(s):
     s = s.strip()
     if s == "" or s in ("~", "null"):
         return None
-    if s[0] in "[{\"":
+    if s[0] == "[" and s.endswith("]"):
+        try:
+            return json.loads(s)
+        except ValueError:
+            return _flow_list(s)
+    if s[0] in "{\"":
         return json.loads(s)
     if s[0] == "'" and s.endswith("'") and len(s) > 1:
         return s[1:-1].replace("''", "'")
@@ -76,6 +81,36 @@ def _scalar(s):
     if re.fullmatch(r"-?\d+", s):
         return int(s)
     return s
+
+
+def _flow_list(s):
+    """[a, 'b', "c", [d, e]] without JSON quoting: one level of nesting."""
+    out, stack, cur, q, quoted = [], [], "", None, False
+    items = out
+    for ch in s[1:-1] + ",":
+        if q:
+            if ch == q:
+                q = None
+            else:
+                cur += ch
+            continue
+        if ch in "'\"":
+            q, quoted, cur = ch, True, ""
+        elif ch == "[":
+            stack.append(items)
+            new = []
+            items.append(new)
+            items = new
+        elif ch in ",]":
+            v = cur if quoted else cur.strip()
+            if v or quoted:
+                items.append(int(v) if not quoted and re.fullmatch(r"-?\d+", v) else v)
+            cur, quoted = "", False
+            if ch == "]":
+                items = stack.pop() if stack else out
+        else:
+            cur += ch
+    return out
 
 
 def parse_yaml(text):
@@ -252,9 +287,26 @@ def split_segments(cmd, powershell=False):
     return segs
 
 
-WRAPPERS = {"sudo", "env", "nohup", "time", "command", "exec", "nice", "doas"}
+# wrapper -> its options that take a value; positional = leading non-option args it eats
+WRAPPERS = {
+    "sudo": ({"-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U", "-D"}, 0),
+    "doas": ({"-u", "-C"}, 0),
+    "env": ({"-u", "-C", "-S", "--unset", "--chdir"}, 0),
+    "nice": ({"-n", "--adjustment"}, 0),
+    "timeout": ({"-s", "-k", "--signal", "--kill-after"}, 1),
+    "xargs": ({"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"}, 0),
+    "nohup": (set(), 0), "time": (set(), 0), "command": (set(), 0), "exec": (set(), 0),
+    "stdbuf": ({"-i", "-o", "-e"}, 0), "ionice": ({"-c", "-n"}, 0),
+}
+KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "done", "time"}
 SHELLS_C = {"sh", "bash", "zsh", "dash", "ksh"}
 PWSH = {"powershell", "pwsh"}
+# Programs whose file arguments are read and shown to the agent.
+READERS = {"cat", "less", "more", "head", "tail", "bat", "batcat", "strings", "xxd", "od", "hexdump",
+           "base64", "nl", "tac", "type", "get-content", "gc", "grep", "egrep", "fgrep", "rg", "ag",
+           "awk", "sed", "jq", "yq", "source", ".", "select-string", "sls", "findstr", "diff", "vim", "vi",
+           "nano", "code", "scp", "curl"}
+PATTERN_FIRST = {"grep", "egrep", "fgrep", "rg", "ag", "awk", "sed", "jq", "yq", "findstr"}
 
 
 def _prog(tok):
@@ -263,16 +315,26 @@ def _prog(tok):
 
 
 def _unwrap(argv):
-    """Strip VAR=x prefixes and wrappers. Returns (argv, nested_command|None)."""
+    """Strip VAR=x prefixes, shell keywords and wrappers. Returns (argv, nested_command|None)."""
+    argv = [a for a in argv]
+    while argv and argv[0].startswith("("):
+        argv[0] = argv[0].lstrip("(")
+        if not argv[0]:
+            argv.pop(0)
+    argv = [a.rstrip(")") if a.endswith(")") and "(" not in a else a for a in argv]
     i = 0
     while i < len(argv):
         t = argv[i]
-        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t) or t in KEYWORDS:
             i += 1
         elif _prog(t) in WRAPPERS:
+            with_val, positional = WRAPPERS[_prog(t)]
             i += 1
             while i < len(argv) and argv[i].startswith("-"):
+                i += 2 if argv[i] in with_val else 1
+            while i < len(argv) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i]):
                 i += 1
+            i += positional
         else:
             break
     argv = argv[i:]
@@ -298,7 +360,7 @@ def _flag_present(want, flags, ci, prefix):
         a, b = (xx.lower(), want.lower()) if ci else (xx, want)
         if a == b:
             return True
-        if prefix and len(a) >= 3 and b.startswith(a):
+        if prefix and len(a) >= 2 and a != "-" and b.startswith(a):
             return True
         # short-flag cluster: -f inside -rf / -fu
         if (len(want) == 2 and want[0] == "-" and want[1] != "-" and not x.startswith("--")
@@ -336,13 +398,35 @@ def rule_matches(rule, argv):
         group = group if isinstance(group, list) else [group]
         if not any(_flag_present(g, flags, ci, bool(rule.get("prefix"))) for g in group):
             return False
+    norm = [a.replace("\\", "/") for a in args]
     pats = rule.get("args")
-    if pats:
-        norm = [a.replace("\\", "/") for a in args]
-        if not any(fnmatch.fnmatchcase(a.lower() if ci else a, p.lower() if ci else p)
-                   for a in norm for p in pats):
-            return False
+    if pats and not any(fnmatch.fnmatchcase(a.lower() if ci else a, p.lower() if ci else p)
+                        for a in norm for p in pats):
+        return False
+    rx = rule.get("args_regex")
+    if rx and not any(re.search(r, a, re.I if ci else 0) for a in norm for r in rx):
+        return False
     return True
+
+
+def _reads(argv):
+    """File arguments a reader program will show to the agent."""
+    p = _prog(argv[0])
+    if p not in READERS:
+        return []
+    out, skipped_pattern = [], p not in PATTERN_FIRST
+    for tok in argv[1:]:
+        t = tok.lstrip("<@")
+        if t.startswith("-"):
+            if "=" in t:
+                out.append(t.split("=", 1)[1])
+            continue
+        if not skipped_pattern:
+            skipped_pattern = True
+            continue
+        if t and "\n" not in t:
+            out.append(t)
+    return out
 
 
 def check_command(cmd, cfg, cwd=None, powershell=False, _depth=0):
@@ -364,21 +448,39 @@ def check_command(cmd, cfg, cwd=None, powershell=False, _depth=0):
             if rule_matches(rule, argv):
                 return True, rule.get("id", "rule"), "Blocked by rule '%s': %s" % (
                     rule.get("id", "rule"), rule.get("reason", "destructive command"))
-        if pipe and k + 1 < len(unwrapped) and unwrapped[k + 1][1] == "|":
-            src, dst = _prog(argv[0]), unwrapped[k + 1][0]
-            if dst and src in [p.lower() for p in pipe.get("from", [])] and \
-                    _prog(dst[0]) in [p.lower() for p in pipe.get("to", [])]:
-                return True, "pipe-to-shell", "Blocked by rule 'pipe-to-shell': %s" % pipe.get(
-                    "reason", "download the script, read it, then run it")
-        for tok in argv[1:]:
-            t = tok.lstrip("<>&0123456789")
-            if not t or t.startswith("-") or "\n" in t:
-                continue
-            if "=" in t and not os.path.exists(t):
-                t = t.split("=", 1)[1] or t
+        if pipe:
+            frm = [p.lower() for p in pipe.get("from", [])]
+            to = [p.lower() for p in pipe.get("to", [])]
+            why = "Blocked by rule 'pipe-to-shell': %s" % pipe.get("reason", "download the script, read it, then run it")
+            # curl ... | [tee ... |] sh  : any later segment of the same pipeline
+            if _prog(argv[0]) in frm:
+                for argv2, op2 in unwrapped[k + 1:]:
+                    if op2 != "|":
+                        break
+                    if argv2 and _prog(argv2[0]) in to:
+                        return True, "pipe-to-shell", why
+            # bash -c "$(curl ...)", bash <(curl ...), iex (irm ...)
+            if _prog(argv[0]) in to or _prog(argv[0]) in SHELLS_C:
+                for tok in argv[1:]:
+                    for piece in re.split(r"[\s\"']+", tok):
+                        if _prog(piece.lstrip("$<(`")) in frm and piece[:1] in "$<(`":
+                            return True, "pipe-to-shell", why
+        for t in _reads(argv):
             blocked, why = path_verdict(t, cfg, cwd)
             if blocked:
                 return True, "deny-read", why
+        # The project's own rules file: no shell edits either. Readers may look
+        # at it (sed and awk excepted: they edit in place); a redirect into it never.
+        reader = _prog(argv[0]) in READERS - {"sed", "awk"}
+        prev = ""
+        for tok in argv[1:]:
+            redirect = tok.startswith(">") or prev in (">", ">>", "1>", "2>")
+            prev = tok
+            t = tok.lstrip("<>&|0123456789")
+            if t and (redirect or not reader):
+                blocked, why = path_verdict(t, cfg, cwd, "deny_write")
+                if blocked:
+                    return True, "deny-write", why
     return False, "", ""
 
 
@@ -443,7 +545,7 @@ def _write_locks(locks):
 
 def acquire(path, owner, ttl_minutes=30, note="", cwd=None, max_ttl=120):
     key = _norm(path, cwd)
-    ttl = max(1, min(int(ttl_minutes or 30), int(max_ttl)))
+    ttl = max(1.0, min(float(ttl_minutes or 30), float(max_ttl)))
     with _Mutex():
         locks = _read_locks()
         cur = locks.get(key)
@@ -550,7 +652,8 @@ def decide(tool, tool_input, owner, cwd, cfg):
 
 def _stdin_json():
     try:
-        return json.loads(sys.stdin.read() or "{}")
+        raw = sys.stdin.buffer.read().decode("utf-8", "replace")  # Windows defaults to cp1252
+        return json.loads(raw or "{}")
     except ValueError:
         return {}
 
@@ -705,9 +808,15 @@ def mcp_serve():
         if not line:
             continue
         try:
-            reply = mcp_handle(json.loads(line))
-        except ValueError:
-            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
+            msg = json.loads(line)
+            if not isinstance(msg, dict):
+                raise ValueError("not a JSON-RPC object")
+            reply = mcp_handle(msg)
+        except ValueError as e:
+            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error: %s" % e}}
+        except Exception as e:  # never let one bad message kill the server
+            reply = {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None,
+                     "error": {"code": -32603, "message": "internal error: %s" % e}}
         if reply is not None:
             sys.stdout.write(json.dumps(reply) + "\n")
             sys.stdout.flush()
@@ -741,8 +850,14 @@ def main(argv):
     if mode in hooks:
         try:
             return hooks[mode]()
-        except Exception as e:  # fail open: a broken guard must never stop work
+        except Exception as e:  # fail open: a broken guard must never stop work, but say so
             log({"agent": mode, "error": repr(e)[:300]})
+            msg = "Guardrails is OFF for this call (%s). Fix it, then check with: guardrails.py health" % (
+                repr(e)[:200])
+            if mode == "hook":
+                print(json.dumps({"systemMessage": msg}))
+            elif mode == "cursor-hook":
+                print(json.dumps({"permission": "allow", "user_message": msg}))
             return 0
     if mode == "mcp":
         return mcp_serve()

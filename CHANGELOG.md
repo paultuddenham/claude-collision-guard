@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1 (26-Nov-2026)
+
+- Weekly note at session start: if the guard blocked at least one overwrite
+  in the last 7 days, one line says how many, with a link to the paid version
+  (Orchestrate). At most once every 7 days per machine, never on a prompt and
+  never inside a block message the agent reads. Turn it off with
+  `"offer_note": false` in `config.json` or `COLLISION_GUARD_NO_OFFER=1`.
+- Blocks are counted in `~/.claude/orchestration/offer.json` (timestamps
+  only, last 7 days, nothing leaves the machine). A broken or missing file is
+  ignored.
+- Self-test and 11 new tests cover the note: none without blocks, shown once,
+  singular and plural, both off switches, the end of the launch price, a
+  corrupt state file, and the hook launcher end to end.
+
 ## 1.2.0 (25-Nov-2026)
 
 - New `scripts/guardrails.py` (one file, standard library only) and

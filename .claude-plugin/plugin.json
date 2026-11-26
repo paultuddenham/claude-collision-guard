@@ -1,7 +1,7 @@
 {
   "name": "collision-guard",
   "displayName": "Tudlab Code: Collision Guard (free)",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Stops parallel AI coding agents (Claude Code, Codex, Cursor) writing over each other: file claims and enforced locks, plus guardrails that block reading secrets and destructive git/shell commands.",
   "author": {
     "name": "Tudlab Code"

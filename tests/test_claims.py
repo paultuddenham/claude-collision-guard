@@ -154,6 +154,120 @@ class ModeTests(GuardTestCase):
         self.assertEqual(self.run_mode(claims.cmd_check, self.payload("sess-b"), cfg).strip(), "")
 
 
+class OfferNoteTests(GuardTestCase):
+    """The weekly note: counted on a real deny, shown at session start only,
+    at most once per 7 days, never in a deny reason, and easy to turn off."""
+    def setUp(self):
+        super().setUp()
+        import time as _t
+        self.nov = int(_t.mktime((2026, 11, 26, 12, 0, 0, 0, 0, -1)))
+        self.jan = int(_t.mktime((2027, 1, 1, 12, 0, 0, 0, 0, -1)))
+        self._old_env = os.environ.pop("COLLISION_GUARD_NO_OFFER", None)
+
+    def tearDown(self):
+        os.environ.pop("COLLISION_GUARD_NO_OFFER", None)
+        if self._old_env is not None:
+            os.environ["COLLISION_GUARD_NO_OFFER"] = self._old_env
+        super().tearDown()
+
+    def at(self, t):
+        claims.now = lambda: t
+
+    def collide(self, a="sess-a", b="sess-b"):
+        self.run_mode(claims.cmd_touch, self.payload(a))
+        return self.run_mode(claims.cmd_check, self.payload(b))
+
+    def start(self, event="SessionStart"):
+        out = self.run_mode(claims.cmd_digest, {"session_id": "sess-c", "hook_event_name": event})
+        return json.loads(out).get("systemMessage") if out.strip() else None
+
+    def test_no_blocks_no_note(self):
+        self.at(self.nov)
+        self.assertIsNone(self.start())
+
+    def test_one_block_shows_once_singular_and_never_in_the_deny(self):
+        self.at(self.nov)
+        reason = self.assert_denied(self.collide(), "Another live Claude Code session")
+        self.assertNotIn("gumroad", reason)
+        self.assertNotIn("Orchestrate", reason)
+        self.assertIsNone(self.start("UserPromptSubmit"), "never on a prompt, only at session start")
+        note = self.start()
+        self.assertTrue(note.startswith("Collision Guard stopped 1 overwrite between your sessions this week."), note)
+        self.assertIn("https://tudlabhome.gumroad.com/l/tudlab-code-orchestrate", note)
+        self.assertTrue(note.endswith("(launch price US$9 until 31-Dec: https://tudlabhome.gumroad.com/l/tudlab-code-orchestrate/LAUNCH9)"), note)
+        self.at(self.nov + 6 * 86400)
+        self.assertIsNone(self.start(), "shown at most once per 7 days")
+
+    def test_retry_after_the_block_is_not_counted(self):
+        self.at(self.nov)
+        self.collide()
+        self.run_mode(claims.cmd_check, self.payload("sess-b"))   # allowed retry
+        self.assertEqual(len(claims._offer_state()["blocks"]), 1)
+
+    def test_stale_copy_block_counts_too(self):
+        self.at(self.nov)
+        self.run_mode(claims.cmd_touch, self.payload("sess-a"))
+        self.run_mode(claims.cmd_release, {"session_id": "sess-a"})
+        self.assert_denied(self.run_mode(claims.cmd_check, self.payload("sess-b")), "Possible stale copy")
+        self.assertIn("1 overwrite ", self.start())
+
+    def test_warn_mode_records_nothing(self):
+        self.at(self.nov)
+        cfg = self.config(guard_mode="warn")
+        self.run_mode(claims.cmd_touch, self.payload("sess-a"), cfg)
+        self.run_mode(claims.cmd_check, self.payload("sess-b"), cfg)
+        self.assertIsNone(self.start())
+
+    def test_shows_again_after_7_days_with_plural_count(self):
+        self.at(self.nov)
+        self.collide()
+        self.assertIsNotNone(self.start())
+        self.at(self.nov + 8 * 86400)
+        self.collide("sess-d", "sess-e")
+        claims.record_block(self.nov + 8 * 86400)
+        self.assertIn("stopped 2 overwrites", self.start())
+
+    def test_old_blocks_do_not_count(self):
+        self.at(self.nov)
+        self.collide()
+        self.at(self.nov + 8 * 86400)
+        self.assertIsNone(self.start())
+
+    def test_config_off_switch(self):
+        self.at(self.nov)
+        self.collide()
+        self.config(offer_note=False)
+        self.assertIsNone(self.start())
+
+    def test_env_off_switch(self):
+        self.at(self.nov)
+        self.collide()
+        os.environ["COLLISION_GUARD_NO_OFFER"] = "1"
+        self.assertIsNone(self.start())
+
+    def test_no_launch_price_after_31_december(self):
+        self.at(self.jan)
+        self.collide()
+        note = self.start()
+        self.assertIn("stopped 1 overwrite ", note)
+        self.assertNotIn("LAUNCH9", note)
+        self.assertNotIn("US$9", note)
+
+    def test_corrupt_state_file_is_ignored(self):
+        self.at(self.nov)
+        self.run_mode(claims.cmd_touch, self.payload("sess-a"))   # so the digest has a table to print
+        for junk in ("{not json", "[1, 2]", '{"blocks": "x", "last_shown": "y"}', '{"blocks": [null, "a", 1e400]}'):
+            with open(os.path.join(self.home, "offer.json"), "w") as fh:
+                fh.write(junk)
+            out = self.run_mode(claims.cmd_digest, {"session_id": "sess-c", "hook_event_name": "SessionStart"})
+            data = json.loads(out)
+            self.assertIn("LIVE CLAIMS", data["hookSpecificOutput"]["additionalContext"], junk)
+            self.assertNotIn("systemMessage", data, junk)
+        # and a deny on top of a corrupt file still works and starts a clean count
+        self.assert_denied(self.run_mode(claims.cmd_check, self.payload("sess-b")), "Another live Claude Code session")
+        self.assertEqual(len(claims._offer_state()["blocks"]), 1)
+
+
 class CommandLineTests(GuardTestCase):
     def cli(self, *args, stdin=""):
         env = dict(os.environ, ORCH_HOME=self.home)
@@ -196,6 +310,10 @@ class CommandLineTests(GuardTestCase):
         r = hook("check", self.payload("sess-b"))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assert_denied(r.stdout, "Another live Claude Code session")
+        env.pop("COLLISION_GUARD_NO_OFFER", None)
+        r = hook("digest", {"session_id": "sess-c", "hook_event_name": "SessionStart"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Collision Guard stopped 1 overwrite between", json.loads(r.stdout)["systemMessage"])
 
 
 if __name__ == "__main__":

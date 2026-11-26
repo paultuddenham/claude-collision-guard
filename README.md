@@ -104,7 +104,7 @@ Start a new session. Then check the guard actually fires (replace `<version>` wi
 python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py selftest
 ```
 
-(On Windows use `python`.) You should see three PASS lines. Or try it for
+(On Windows use `python`.) You should see only PASS lines. Or try it for
 real: open two sessions in the same folder, have the first edit a file, then
 ask the second to edit the same file. The second is stopped once and told why.
 
@@ -156,6 +156,17 @@ Optional. Create `~/.claude/orchestration/config.json`:
 a broad label on every file that matches, so two sessions in the same area see
 each other even when they touch different files.
 
+### Weekly note
+
+If the guard blocked at least one overwrite in the last 7 days, the next
+session start shows one line, at most once every 7 days on this machine:
+"Collision Guard stopped N overwrites between your sessions this week", with a
+link to the paid version (and, until 31-Dec-2026, its launch price). It never
+appears on a prompt or inside a block message the agent reads. The count is
+kept as timestamps in `~/.claude/orchestration/offer.json` and never leaves
+your machine. To turn it off, add `"offer_note": false` to `config.json`, or
+set the environment variable `COLLISION_GUARD_NO_OFFER=1`.
+
 To drop this session's claims early:
 `echo '{"session_id": "<id>"}' | python3 ~/.claude/plugins/cache/tudlab/collision-guard/<version>/scripts/claims.py release`
 
@@ -199,6 +210,10 @@ version adds a shared blackboard injected into every session (including
 themselves, a task-card handshake, setup and announce skills, and a 23-page
 guide on tuning out false alarms and testing a guard that fails silently.
 US$19: https://gumroad.com/l/tudlab-code-orchestrate
+
+This free plugin mentions it once a week at most, in one line at session
+start, and only in a week when it actually stopped an overwrite (see
+[Weekly note](#weekly-note) for what it says and how to turn it off).
 
 If you install the full plugin, uninstall this one first
 (`claude plugin uninstall collision-guard@tudlab`); the full plugin includes

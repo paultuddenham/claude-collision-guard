@@ -11,7 +11,8 @@ Modes (first argument). Each reads the hook's JSON payload on stdin.
                              or if someone changed a file since you read it
   end      SessionEnd        the session closed: drop its claims and read records
   release  by hand / skill   drop this session's claims now (read records stay)
-  digest   SessionStart/UserPromptSubmit   inject the live claims table
+  digest   SessionStart/UserPromptSubmit   inject the live claims table (plus,
+                             at session start, the weekly note: see offer_line)
   show     by hand           print the table, even when it is empty
   gc       by hand           prune expired entries
   health   by hand           print where state lives, when the guard last ran
@@ -112,6 +113,11 @@ DEFAULTS = {
     "on_card_change_command": "",
     # Optional: stop shell rewrites of the blackboard (steer to the Edit tool).
     "shared_file_guard": False,
+    # At most once a week, at session start, and only if the guard blocked at
+    # least one overwrite in the last 7 days: one line saying how many, with a
+    # link to the paid version. false turns it off (so does the environment
+    # variable COLLISION_GUARD_NO_OFFER=1).
+    "offer_note": True,
 }
 
 
@@ -1011,6 +1017,7 @@ def cmd_check(payload, cfg):
         for k in all_keys:
             d["warned"][sid + "|" + k] = t
         write_json(claims_path(), d)
+        record_block(t)   # still under the lock; never raises
 
     names = session_names()
     if conflicts:
@@ -1130,13 +1137,120 @@ def digest_lines(cfg, me=None, include_empty=False):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Weekly note: how many overwrites the guard stopped, with a link to the full
+# version. Shown at session start only, at most once per 7 days per machine,
+# and only if there was at least one block in the last 7 days. It goes to the
+# person (systemMessage), never into a deny reason the agent reads.
+# ---------------------------------------------------------------------------
+
+OFFER_URL = "https://tudlabhome.gumroad.com/l/tudlab-code-orchestrate"
+OFFER_LAUNCH_URL = OFFER_URL + "/LAUNCH9"
+OFFER_LAUNCH_LAST_DAY = (2026, 12, 31)   # local date, inclusive
+OFFER_WINDOW = 7 * 86400
+OFFER_MAX_BLOCKS = 500
+
+
+def offer_path():
+    return os.path.join(state_dir(), "offer.json")
+
+
+def _offer_state():
+    """{"blocks": [epoch, ...], "last_shown": epoch}; anything malformed reads as empty."""
+    d = read_json(offer_path(), {})
+    if not isinstance(d, dict):
+        d = {}
+    blocks = d.get("blocks")
+    if not isinstance(blocks, list):
+        blocks = []
+    clean = []
+    for x in blocks:
+        try:
+            if not isinstance(x, bool):
+                clean.append(int(x))
+        except Exception:
+            pass
+    try:
+        last = int(d.get("last_shown") or 0)
+    except Exception:
+        last = 0
+    return {"blocks": clean, "last_shown": last}
+
+
+def record_block(t=None):
+    """Remember that the guard just denied a write. Called under claims.lock.
+    Keeps 7 days (and at most OFFER_MAX_BLOCKS entries). Never raises."""
+    try:
+        t = int(t or now())
+        d = _offer_state()
+        d["blocks"] = [x for x in d["blocks"] if t - x < OFFER_WINDOW][-(OFFER_MAX_BLOCKS - 1):] + [t]
+        write_json(offer_path(), d)
+    except Exception:
+        pass
+
+
+def offer_off(cfg):
+    env = str(os.environ.get("COLLISION_GUARD_NO_OFFER") or "").strip().lower()
+    if env and env not in ("0", "false", "no", "off"):
+        return True
+    v = cfg.get("offer_note", True)
+    if v is False or str(v).strip().lower() in ("false", "0", "no", "off"):
+        return True
+    return False
+
+
+def offer_text(n, t):
+    text = ("Collision Guard stopped %d overwrite%s between your sessions this week. "
+            "The full version (Orchestrate) adds a shared notes file every session reads "
+            "and a view of which session is on which task: %s" % (n, "" if n == 1 else "s", OFFER_URL))
+    if tuple(time.localtime(t)[:3]) <= OFFER_LAUNCH_LAST_DAY:
+        text += " (launch price US$9 until 31-Dec: %s)" % OFFER_LAUNCH_URL
+    return text
+
+
+def offer_line(cfg, t=None):
+    """The weekly note, or None. Marks it shown. Never raises."""
+    try:
+        if offer_off(cfg):
+            return None
+        t = int(t or now())
+
+        def due(d):
+            n = sum(1 for x in d["blocks"] if 0 <= t - x < OFFER_WINDOW)
+            recent = 0 <= t - d["last_shown"] < OFFER_WINDOW
+            return n if n and not recent else 0
+
+        if not due(_offer_state()):
+            return None
+        with FileLock(lock_path()) as lk:
+            if not lk.ok:
+                return None
+            d = _offer_state()
+            n = due(d)
+            if not n:
+                return None
+            d["blocks"] = [x for x in d["blocks"] if 0 <= t - x < OFFER_WINDOW]
+            d["last_shown"] = t
+            if not write_json(offer_path(), d):
+                return None   # could not remember showing it, so do not show it
+        return offer_text(n, t)
+    except Exception:
+        return None
+
+
 def cmd_digest(payload, cfg):
     lines = digest_lines(cfg, me=session_of(payload))
-    if not lines:
-        return
     event = payload.get("hook_event_name") or "UserPromptSubmit"
-    text = "\n".join(lines)[:9000]
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+    note = offer_line(cfg) if event == "SessionStart" else None
+    if not lines and not note:
+        return
+    out = {}
+    if lines:
+        text = "\n".join(lines)[:9000]
+        out["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": text}
+    if note:
+        out["systemMessage"] = note
+    print(json.dumps(out))
 
 
 def cmd_health(cfg):
@@ -1216,11 +1330,14 @@ def cmd_selftest():
         first = run(cmd_check, b)
         second = run(cmd_check, b)
         read = resources_for("Bash", {"command": "grep -n x " + target}, tmp, cfg)
+        counted = len(_offer_state()["blocks"])
         checks = [
             ("guard denies a write to a file another live session holds", '"deny"' in first),
             ("guard lets the retry through after warning once", second.strip() == ""),
             ("a plain read claims nothing", read == []),
+            ("the block is counted for the weekly note (once, not per retry)", counted == 1),
         ]
+        checks += _offer_checks(os.path.join(tmp, "offer"), run)
         for label, passed in checks:
             print("%s  %s" % ("PASS" if passed else "FAIL", label))
             ok = ok and passed
@@ -1231,6 +1348,67 @@ def cmd_selftest():
             os.environ["ORCH_HOME"] = old
         shutil.rmtree(tmp, ignore_errors=True)
     return ok
+
+
+def _offer_checks(base, run):
+    """Weekly-note cases for selftest. Each case gets its own state folder;
+    dates are fixed so the result does not depend on today."""
+    t = int(time.mktime((2026, 11, 26, 12, 0, 0, 0, 0, -1)))
+    later = int(time.mktime((2027, 1, 1, 12, 0, 0, 0, 0, -1)))
+    cfg = dict(DEFAULTS)
+    old_env = os.environ.pop("COLLISION_GUARD_NO_OFFER", None)
+    out = []
+
+    def fresh(name):
+        d = os.path.join(base, name)
+        os.makedirs(d, exist_ok=True)
+        os.environ["ORCH_HOME"] = d
+        return d
+
+    try:
+        fresh("none")
+        out.append(("weekly note: no blocks this week, no note", offer_line(cfg, t) is None))
+
+        fresh("one")
+        record_block(t - 3600)
+        first = offer_line(cfg, t) or ""
+        again = offer_line(cfg, t + 86400)
+        out.append(("weekly note: one block shows the note, singular, with launch price",
+                    first.startswith("Collision Guard stopped 1 overwrite between") and first.endswith("/LAUNCH9)")))
+        out.append(("weekly note: not shown again within 7 days", again is None))
+
+        fresh("cfg")
+        record_block(t - 3600)
+        out.append(("weekly note: offer_note false turns it off", offer_line(dict(cfg, offer_note=False), t) is None))
+
+        fresh("env")
+        record_block(t - 3600)
+        os.environ["COLLISION_GUARD_NO_OFFER"] = "1"
+        try:
+            env_off = offer_line(cfg, t) is None
+        finally:
+            os.environ.pop("COLLISION_GUARD_NO_OFFER", None)
+        out.append(("weekly note: COLLISION_GUARD_NO_OFFER=1 turns it off", env_off))
+
+        fresh("late")
+        record_block(later - 3600)
+        record_block(later - 7200)
+        late = offer_line(cfg, later) or ""
+        out.append(("weekly note: after 31-Dec no launch price, plural count",
+                    late.startswith("Collision Guard stopped 2 overwrites") and "LAUNCH9" not in late and "US$9" not in late))
+
+        ok = True
+        for i, junk in enumerate(("{not json", "[1, 2]", '{"blocks": "x", "last_shown": "y"}', '{"blocks": [null, "a", 1e400]}')):
+            d = fresh("bad%d" % i)
+            with open(os.path.join(d, "offer.json"), "w", encoding="utf-8") as fh:
+                fh.write(junk)
+            got = run(cmd_digest, {"session_id": "sess-c", "hook_event_name": "SessionStart"})
+            ok = ok and got.strip() == ""
+        out.append(("weekly note: a corrupt state file is ignored, digest still runs", ok))
+    finally:
+        if old_env is not None:
+            os.environ["COLLISION_GUARD_NO_OFFER"] = old_env
+    return out
 
 
 def main(argv):

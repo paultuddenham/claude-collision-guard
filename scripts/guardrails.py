@@ -26,7 +26,7 @@ import shlex
 import sys
 import time
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(os.path.dirname(HERE), "guardrails.yaml")
 PROJECT_CONFIG = ".guardrails.yaml"

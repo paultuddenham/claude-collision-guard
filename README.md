@@ -13,7 +13,7 @@ config file; another, on a different task, saves its own copy of the same
 file a few minutes later, and the first change is gone. Nobody notices until
 something breaks.
 
-This plugin is one Python file and a few hooks:
+The core of this plugin is one Python file (`scripts/claims.py`) and a few hooks (1.2 adds a second script, `scripts/guardrails.py`, and its rules file, described below):
 
 - Every write (Edit, Write, a shell command that changes a file, an MCP tool
   that changes something) **claims** what it touches. Reads claim nothing, and
@@ -22,7 +22,8 @@ This plugin is one Python file and a few hooks:
   the same thing, or changed the file since this session last read it, the
   write is **blocked once** with a plain reason. The agent reads the reason,
   adjusts its edits or asks you, then its retry goes through. The block does not stay: it fires once per conflict,
-  so a session is never stuck waiting. It is a prompt to coordinate, not a lock.
+  so a session is never stuck waiting. This part is a prompt to coordinate, not a lock. (The
+  separate file locks in 1.2, below, are enforced.)
 - Every session sees a short table of what the other live sessions are
   changing right now.
 - A claim lasts until its session closes, or until it sits unused for 45
@@ -110,7 +111,7 @@ ask the second to edit the same file. The second is stopped once and told why.
 
 ### Without the plugin system
 
-Copy `scripts/claims.py` to `~/.claude/orchestration/claims.py` and add the
+Copy `scripts/claims.py` to `~/.claude/orchestration/claims.py`. For the 1.2 guardrails, also copy `scripts/guardrails.py` and `guardrails.yaml` to `~/.claude/orchestration/`, set the environment variable `GUARDRAILS_CONFIG` to the copied `guardrails.yaml` (the script otherwise looks for it one folder above itself), and add its hook entries (the `guardrails.py hook` and `guardrails.py end` lines in `hooks/hooks.json`) the same way. Then add the
 hooks to `~/.claude/settings.json` yourself. The five hook entries (the digest
 command runs twice, at session start and on each prompt) are in
 `hooks/hooks.json`; replace the `sh ... run-hook claims.py` part of each
